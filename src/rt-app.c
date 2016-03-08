@@ -291,20 +291,6 @@ void *thread_body(void *arg)
 				   "\t\tend\t\tdeadline\tdur.\tslack"
 				   "\tBudget\tUsed Budget\n");
 
-
-	if (data->wait_before_start > 0) {
-		log_notice("[%d] Waiting %ld usecs... ", data->ind,
-			 data->wait_before_start);
-		clock_gettime(CLOCK_MONOTONIC, &t_now);
-		t_next = usec_to_timespec(data->wait_before_start);
-		t_next = timespec_add(&t_now, &t_next);
-		clock_nanosleep(CLOCK_MONOTONIC,
-				TIMER_ABSTIME,
-				&t_next,
-				NULL);
-		log_notice("[%d] Starting...", data->ind);
-	}
-
 #ifdef DLSCHED
 	/* TODO find a better way to handle that constraint */
 	/*
@@ -330,6 +316,23 @@ void *thread_body(void *arg)
 		}
 	}
 #endif
+
+	if (data->activation_barrier) {
+		pthread_barrier_wait(data->activation_barrier);
+	}
+
+	if (data->wait_before_start > 0) {
+		log_notice("[%d] Waiting %ld usecs... ", data->ind,
+			 data->wait_before_start);
+		clock_gettime(CLOCK_MONOTONIC, &t_now);
+		t_next = usec_to_timespec(data->wait_before_start);
+		t_next = timespec_add(&t_now, &t_next);
+		clock_nanosleep(CLOCK_MONOTONIC,
+				TIMER_ABSTIME,
+				&t_next,
+				NULL);
+		log_notice("[%d] Starting...", data->ind);
+	}
 
 	if (opts.ftrace)
 		log_ftrace(ft_data.marker_fd, "[%d] starts", data->ind);
@@ -448,6 +451,7 @@ int main(int argc, char* argv[])
 	FILE *gnuplot_script = NULL;
 	int i, res;
 	thread_data_t *tdata;
+	pthread_barrier_t activation_barrier;
 	char tmp[PATH_LENGTH];
 
 	parse_command_line(argc, argv, &opts);
@@ -485,6 +489,8 @@ int main(int argc, char* argv[])
 		log_ftrace(ft_data.marker_fd, "main creates threads\n");
 	}
 
+	pthread_barrier_init(&activation_barrier, NULL, nthreads);
+
 	continue_running = 1;
 
 	/* Take the beginning time for everything */
@@ -506,6 +512,7 @@ int main(int argc, char* argv[])
 		tdata->duration = opts.duration;
 		tdata->main_app_start = t_start;
 		tdata->lock_pages = opts.lock_pages;
+		tdata->activation_barrier = &activation_barrier;
 #ifdef AQUOSA
 		tdata->fragment = opts.fragment;
 #endif
